@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta http-equiv="X-UA-Compatible" content="IE=edge">
+    <meta name="viewport" content="width=device-width, initial-scale=1, shrink-to-fit=no">
+    <title>Handwritten Digital Recognition</title>
+    <link rel="stylesheet" href="https://cdn.staticfile.org/twitter-bootstrap/4.1.0/css/bootstrap.min.css">
+    <script src="https://cdn.staticfile.org/jquery/3.2.1/jquery.min.js"></script>
+    <script src="https://cdn.staticfile.org/popper.js/1.12.5/umd/popper.min.js"></script>
+    <script src="https://cdn.staticfile.org/twitter-bootstrap/4.1.0/js/bootstrap.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/camanjs/4.0.0/caman.full.min.js"></script>
+</head>
+<body style="overflow:hidden">
+<div class="card bg-dark text-white" id="head">
+    <div class="card-body text-center">
+        <h5>
+            Handwritten Digital Recognition
+        </h5>
+    </div>
+</div>
+<div class="card bg-secondary text-white" id="after-head">
+    <div class="card-body">
+        <h5 id="result">
+            The result is none.
+        </h5>
+    </div>
+</div>
+<canvas id="drawing-board"></canvas>
+<div class="container-fluid" id="bottom-button">
+    <div class="row">
+        <button type="button" class="btn btn-dark btn-lg col-6" id="submit">submit</button>
+        <button type="button" class="btn btn-dark btn-lg col-6" id="clear">clear</button>
+    </div>
+</div>
+<script type="text/javascript">
+    let isDown = false;
+    let points = [];
+    let beginPoint = null;
+    let canvas = document.getElementById("drawing-board");
+    let ctx = canvas.getContext("2d");
+    canvas.width = document.documentElement.clientWidth;
+    canvas.height = document.documentElement.clientHeight;
+    canvas.height -= document.getElementById("head").offsetHeight;
+    canvas.height -= document.getElementById("after-head").offsetHeight;
+    canvas.height -= document.getElementById("bottom-button").offsetHeight + 7;
+
+    ctx.strokeStyle = 'black';
+    ctx.lineWidth = 15;
+    ctx.lineJoin = 'round';
+    ctx.lineCap = 'round';
+
+    canvas.addEventListener('mousedown', down, false);
+    canvas.addEventListener('mousemove', move, false);
+    canvas.addEventListener('mouseup', up, false);
+    canvas.addEventListener('mouseout', up, false);
+
+    canvas.addEventListener('touchstart', down, false);
+    canvas.addEventListener('touchmove', move, false);
+    canvas.addEventListener('touchend', up, false);
+    canvas.addEventListener('touchcancel', up, false);
+
+    let minX = -1, maxX = -1, minY = -1, maxY = -1;
+
+    function down(evt) {
+        isDown = true;
+        const {x, y} = getPos(evt);
+        points.push({x, y});
+        beginPoint = {x, y};
+    }
+
+    function move(evt) {
+        if (!isDown) return;
+
+        const {x, y} = getPos(evt);
+        points.push({x, y});
+
+        if (points.length > 3) {
+            const lastTwoPoints = points.slice(-2);
+            const controlPoint = lastTwoPoints[0];
+            const endPoint = {
+                x: (lastTwoPoints[0].x + lastTwoPoints[1].x) / 2,
+                y: (lastTwoPoints[0].y + lastTwoPoints[1].y) / 2,
+            };
+            drawLine(beginPoint, controlPoint, endPoint);
+            beginPoint = endPoint;
+        }
+    }
+
+    function up(evt) {
+        if (!isDown) return;
+        const {x, y} = getPos(evt);
+        points.push({x, y});
+
+        if (points.length > 3) {
+            const lastTwoPoints = points.slice(-2);
+            const controlPoint = lastTwoPoints[0];
+            const endPoint = lastTwoPoints[1];
+            drawLine(beginPoint, controlPoint, endPoint);
+        }
+        beginPoint = null;
+        isDown = false;
+        points = [];
+    }
+
+    function getPos(evt) {
+        let x = evt.clientX - canvas.offsetLeft;
+        let y = evt.clientY - canvas.offsetTop;
+        if (Number.isNaN(x) || Number.isNaN(y)) {
+            x = evt.touches[0].clientX - canvas.offsetLeft;
+            y = evt.touches[0].clientY - canvas.offsetTop;
+        }
+        console.log("x =", x);
+        console.log("y =", y);
+        if (minX === -1) {
+            minX = x;
+            maxX = x;
+            minY = y;
+            maxY = y;
+        } else {
+            minX = Math.min(x, minX);
+            maxX = Math.max(x, maxX);
+            minY = Math.min(y, minY);
+            maxY = Math.max(y, maxY);
+        }
+        return {
+            x: x,
+            y: y
+        }
+    }
+
+    function drawLine(beginPoint, controlPoint, endPoint) {
+        ctx.beginPath();
+        ctx.moveTo(beginPoint.x, beginPoint.y);
+        ctx.quadraticCurveTo(controlPoint.x, controlPoint.y, endPoint.x, endPoint.y);
+        ctx.stroke();
+        ctx.closePath();
+    }
+
+
+    let ws = new WebSocket("ws://10.40.32.57:8080/drawing-board");
+    document.getElementById("submit").addEventListener("click",canvasCaptrueAndSubmit);
+    document.getElementById("clear").addEventListener("click",clearCanvas);
+
+    function clearCanvas() {
+        ctx.clearRect(0, 0, canvas.width, canvas.height);
+        minX = maxX = minY = maxY = -1;
+    }
+
+
+    function canvasCaptrueAndSubmit() {
+        maxX = Math.min(maxX + 15, canvas.offsetWidth - 1);
+        maxY = Math.min(maxY + 15, canvas.offsetHeight - 1);
+        minX = Math.max(minX - 15, 0);
+        minY = Math.max(minY - 15, 0);
+        let tempCanvas = document.getElementById("temp-canvas");
+        let tempCtx = tempCanvas.getContext("2d");
+        let rawWidth = maxX - minX + 1;
+        let rawHeight = maxY - minY + 1;
+        tempCanvas.width = Math.floor(rawWidth * 1.6);
+        tempCanvas.height = Math.floor(rawHeight * 1.6);
+        let data = ctx.getImageData(minX, minY, rawWidth, rawHeight);
+        tempCtx.putImageData(data, Math.floor(rawWidth * 0.3), Math.floor(rawHeight * 0.3));
+        let b64 = tempCanvas.toDataURL();
+        console.log(b64);
+        tempCanvas.width = 32;
+        tempCanvas.height = 32;
+        let image = new Image();
+        image.onload = function () {
+            tempCtx.drawImage(image, 0, 0, 32, 32);
+            let imageDataDic = tempCtx.getImageData(0, 0, 32, 32).data;
+            let imageDataArr = new Array(32);
+            for (let i = 0; i < 32; i++) {
+                imageDataArr[i] = new Array(32);
+                for (let j = 0; j < 32; j++) {
+                    imageDataArr[i][j] = new Array(4);
+                    for (let k = 0; k < 4; k++) {
+                        imageDataArr[i][j][k] = imageDataDic[i * 32 * 4 + j * 4 + k]
+                    }
+                }
+            }
+            ws.send(JSON.stringify(imageDataArr));
+            clearCanvas();
+        };
+        image.src = b64;
+    }
+
+    ws.onmessage = function (res) {
+        document.getElementById("result").innerText = "The result is " + res.data + ".";
+    };
+</script>
+<canvas id="temp-canvas" style="display: none"></canvas>
+</body>
+</html>
